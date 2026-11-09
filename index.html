@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Construcción Infinita</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000000;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            cursor: default;
+        }
+
+        /* Botón de Inicio Blanco Centrado */
+        #btn-inicio {
+            padding: 18px 45px;
+            font-size: 1.6rem;
+            color: #ffffff;
+            background: transparent;
+            border: 2px solid #ffffff;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.4);
+            z-index: 10;
+        }
+
+        #btn-inicio:hover {
+            background-color: #ffffff;
+            color: #000000;
+            box-shadow: 0 0 35px rgba(255, 255, 255, 0.9);
+            transform: scale(1.08);
+        }
+
+        /* Controles Flotantes Superior Derecha */
+        .controles {
+            display: none;
+            position: fixed;
+            top: 25px;
+            right: 25px;
+            gap: 12px;
+            z-index: 20;
+        }
+
+        .btn-control {
+            padding: 10px 22px;
+            font-size: 0.95rem;
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 30px;
+            backdrop-filter: blur(5px);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-control:hover {
+            background: #ffffff;
+            color: #000000;
+            transform: scale(1.05);
+        }
+
+        #btn-salir:hover {
+            background: rgba(255, 0, 85, 0.9);
+            border-color: #ff0055;
+            color: #ffffff;
+        }
+
+        /* Contenedor del Lienzo */
+        #canvas-container {
+            display: none;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- CAMBIA AQUÍ LA RUTA A TU ARCHIVO DE AUDIO -->
+    <audio id="miMusica" src="musica40.mp3" preload="auto" loop></audio>
+
+    <!-- Botón de Inicio Blanco -->
+    <button id="btn-inicio">Inicio</button>
+
+    <!-- Controles flotantes -->
+    <div class="controles" id="panel-controles">
+        <button class="btn-control" id="btn-audio">🔊 Sonido: ON</button>
+        <button class="btn-control" id="btn-salir">Salir</button>
+    </div>
+
+    <!-- Contenedor del lienzo -->
+    <div id="canvas-container">
+        <canvas id="stairsCanvas"></canvas>
+    </div>
+
+    <script>
+        const btnInicio = document.getElementById('btn-inicio');
+        const btnSalir = document.getElementById('btn-salir');
+        const btnAudio = document.getElementById('btn-audio');
+        const panelControles = document.getElementById('panel-controles');
+        const canvasContainer = document.getElementById('canvas-container');
+        const canvas = document.getElementById('stairsCanvas');
+        const ctx = canvas.getContext('2d');
+        const audioElement = document.getElementById('miMusica');
+
+        let animacionId = null;
+        let activo = false;
+
+        // Configuración de escaleras
+        const ANCHO_ESCALERA = 50;
+        const PASO_PELDAÑO = 25;
+        const VELOCIDAD_CONSTRUCCION = 6; // Peldaños por frame aprox.
+
+        let numEscalerasTotal = 0;
+        let escaleraActualIdx = 0;
+        let alturaConstruccionActual = 0;
+
+        // Estados: 'CONSTRUYENDO', 'ESPERA_LLENO', 'DESMORONANDO', 'ESPERA_REINICIO'
+        let estado = 'CONSTRUYENDO';
+        let tiempoEstado = 0;
+
+        let estructurasEscaleras = []; // Guardará las partes dibujadas
+        let particulasDesmoronadas = [];
+
+        function ajustarCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            numEscalerasTotal = Math.ceil(canvas.width / ANCHO_ESCALERA);
+        }
+
+        window.addEventListener('resize', () => {
+            if (activo) {
+                ajustarCanvas();
+                reiniciarBucle();
+            }
+        });
+
+        btnAudio.addEventListener('click', (e) => {
+            e.stopPropagation();
+            audioElement.muted = !audioElement.muted;
+            btnAudio.textContent = audioElement.muted ? "🔇 Sonido: OFF" : "🔊 Sonido: ON";
+        });
+
+        btnInicio.addEventListener('click', () => {
+            btnInicio.style.display = 'none';
+            panelControles.style.display = 'flex';
+            canvasContainer.style.display = 'block';
+
+            ajustarCanvas();
+            reiniciarBucle();
+            activo = true;
+
+            audioElement.currentTime = 0;
+            audioElement.muted = false;
+            btnAudio.textContent = "🔊 Sonido: ON";
+            audioElement.play().catch(err => console.log(err));
+
+            iniciarAnimacion();
+        });
+
+        btnSalir.addEventListener('click', (e) => {
+            e.stopPropagation();
+            activo = false;
+            if (animacionId) cancelAnimationFrame(animacionId);
+
+            audioElement.pause();
+            audioElement.currentTime = 0;
+
+            canvasContainer.style.display = 'none';
+            panelControles.style.display = 'none';
+            btnInicio.style.display = 'block';
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        function reiniciarBucle() {
+            estado = 'CONSTRUYENDO';
+            escaleraActualIdx = 0;
+            alturaConstruccionActual = canvas.height;
+            estructurasEscaleras = [];
+            particulasDesmoronadas = [];
+            tiempoEstado = Date.now();
+        }
+
+        function crearParticulasDesmoronamiento() {
+            particulasDesmoronadas = [];
+            
+            // Convertir todas las piezas construidas en fragmentos con física
+            estructurasEscaleras.forEach(e => {
+                let xBase = e.idx * ANCHO_ESCALERA;
+                
+                for (let y = canvas.height; y >= e.alturaActual; y -= PASO_PELDAÑO) {
+                    // Fragmentos de los rieles laterales
+                    particulasDesmoronadas.push({
+                        x: xBase + 5,
+                        y: y,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 2) * 3,
+                        tam: 2.5,
+                        rot: Math.random() * Math.PI,
+                        vRot: (Math.random() - 0.5) * 0.2
+                    });
+                    particulasDesmoronadas.push({
+                        x: xBase + ANCHO_ESCALERA - 5,
+                        y: y,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 2) * 3,
+                        tam: 2.5,
+                        rot: Math.random() * Math.PI,
+                        vRot: (Math.random() - 0.5) * 0.2
+                    });
+
+                    // Fragmento del peldaño horizontal
+                    particulasDesmoronadas.push({
+                        x: xBase + ANCHO_ESCALERA / 2,
+                        y: y,
+                        vx: (Math.random() - 0.5) * 6,
+                        vy: (Math.random() - 2.5) * 3,
+                        tam: 3,
+                        rot: Math.random() * Math.PI,
+                        vRot: (Math.random() - 0.5) * 0.3
+                    });
+                }
+            });
+        }
+
+        function iniciarAnimacion() {
+            if (!activo) return;
+
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const ahora = Date.now();
+
+            // CONTROL DE MAQUINARIA DE ESTADOS
+            if (estado === 'CONSTRUYENDO') {
+                alturaConstruccionActual -= VELOCIDAD_CONSTRUCCION;
+
+                if (alturaConstruccionActual <= 0) {
+                    // La escalera llegó arriba
+                    estructurasEscaleras.push({
+                        idx: escaleraActualIdx,
+                        alturaActual: 0
+                    });
+
+                    escaleraActualIdx++;
+                    alturaConstruccionActual = canvas.height;
+
+                    // Si ya llenamos la pantalla de escaleras
+                    if (escaleraActualIdx >= numEscalerasTotal) {
+                        estado = 'ESPERA_LLENO';
+                        tiempoEstado = ahora;
+                    }
+                }
+            } 
+            else if (estado === 'ESPERA_LLENO') {
+                // Esperar 10 segundos con la pantalla llena de escaleras neón
+                if (ahora - tiempoEstado > 10000) {
+                    estado = 'DESMORONANDO';
+                    tiempoEstado = ahora;
+                    crearParticulasDesmoronamiento();
+                }
+            }
+            else if (estado === 'DESMORONANDO') {
+                // Actualizar físicas de caída
+                let algunaVisible = false;
+                particulasDesmoronadas.forEach(p => {
+                    p.vy += 0.25; // Gravedad
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.rot += p.vRot;
+
+                    if (p.y < canvas.height + 50) algunaVisible = true;
+                });
+
+                // Si todas las piezas ya cayeron de la pantalla
+                if (!algunaVisible || ahora - tiempoEstado > 4000) {
+                    estado = 'ESPERA_REINICIO';
+                    tiempoEstado = ahora;
+                }
+            }
+            else if (estado === 'ESPERA_REINICIO') {
+                // Esperar 5 segundos limpia antes de volver a construir
+                if (ahora - tiempoEstado > 5000) {
+                    reiniciarBucle();
+                }
+            }
+
+            ctx.save();
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = '#ffffff';
+            ctx.lineWidth = 2;
+
+            // DIBUJAR ESCALERAS (En estados CONSTRUYENDO y ESPERA_LLENO)
+            if (estado === 'CONSTRUYENDO' || estado === 'ESPERA_LLENO') {
+                // 1. Escaleras ya completadas previamente
+                estructurasEscaleras.forEach(e => {
+                    dibujarEscalera(e.idx * ANCHO_ESCALERA, 0);
+                });
+
+                // 2. Escalera en construcción actual
+                if (estado === 'CONSTRUYENDO' && escaleraActualIdx < numEscalerasTotal) {
+                    dibujarEscalera(escaleraActualIdx * ANCHO_ESCALERA, alturaConstruccionActual);
+                }
+            }
+
+            // DIBUJAR FRAGMENTOS EN DESMORONAMIENTO
+            if (estado === 'DESMORONANDO') {
+                particulasDesmoronadas.forEach(p => {
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(p.rot);
+                    ctx.fillRect(-p.tam, -p.tam, p.tam * 2, p.tam * 2);
+                    ctx.restore();
+                });
+            }
+
+            ctx.restore();
+
+            animacionId = requestAnimationFrame(iniciarAnimacion);
+        }
+
+        function dibujarEscalera(x, alturaTop) {
+            const xIzq = x + 6;
+            const xDer = x + ANCHO_ESCALERA - 6;
+
+            // Rieles verticales laterales
+            ctx.beginPath();
+            ctx.moveTo(xIzq, canvas.height);
+            ctx.lineTo(xIzq, alturaTop);
+            ctx.moveTo(xDer, canvas.height);
+            ctx.lineTo(xDer, alturaTop);
+            ctx.stroke();
+
+            // Peldaños horizontales
+            for (let y = canvas.height - PASO_PELDAÑO; y >= alturaTop; y -= PASO_PELDAÑO) {
+                ctx.beginPath();
+                ctx.moveTo(xIzq, y);
+                ctx.lineTo(xDer, y);
+                ctx.stroke();
+
+                // Pequeños puntos neón en los ensambles del peldaño
+                ctx.beginPath();
+                ctx.arc(xIzq, y, 2, 0, Math.PI * 2);
+                ctx.arc(xDer, y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    </script>
+</body>
+</html>
